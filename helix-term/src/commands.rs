@@ -15,6 +15,7 @@ use tui::text::Span;
 pub use typed::*;
 
 use helix_core::{
+    bookmark,
     char_idx_at_visual_offset,
     chars::char_is_word,
     comment,
@@ -402,6 +403,7 @@ impl MappableCommand {
         workspace_symbol_picker, "Open workspace symbol picker",
         diagnostics_picker, "Open diagnostic picker",
         workspace_diagnostics_picker, "Open workspace diagnostic picker",
+        bookmark_picker, "Open bookmark picker",
         last_picker, "Open last picker",
         insert_at_line_start, "Insert at start of line",
         insert_at_line_end, "Insert at end of line",
@@ -3236,6 +3238,60 @@ fn changed_file_picker(cx: &mut Context) {
                 true
             }
         });
+    cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn bookmark_picker(cx: &mut Context) {
+    let columns = [
+        PickerColumn::new("path", |bookmark: &bookmark::Bookmark, _| {
+            bookmark.note.clone().into()
+        })
+    ];
+    let picker = Picker::new(
+        columns,
+        0,
+        [],
+        (),
+        |cx, bookmark: &bookmark::Bookmark, action| {
+            let doc = match cx.editor.open(&bookmark.filepath, action) {
+                Ok(id) => doc_mut!(cx.editor, &id),
+                Err(e) => {
+                    cx.editor.set_error(format!("Failed to open file '{}': {}", bookmark.filepath.display(), e));
+                    return;
+                }
+            };
+            let view = view_mut!(cx.editor);
+            let text = doc.text();
+            let line_num = bookmark.line_num - 1; // Editor line nums are 0-indexed
+            if line_num >= text.len_lines() {
+                cx.editor.set_error(
+                    "The line you jumped to does not exist anymore because the file has changed.",
+                );
+                return;
+            }
+            let start = text.line_to_char(line_num);
+            doc.set_selection(view.id, Selection::single(start, start));
+            if action.align_view(view, doc.id()) {
+                align_view(doc, view, Align::Center);
+            }
+        }
+    ).with_preview(|_editor, bookmark::Bookmark { filepath, line_num, ..}| {
+        Some((filepath.as_path().into(), Some((*line_num-1, *line_num-1))))       
+    });
+    let injector = picker.injector();
+    let bookmarks = match bookmark::read_bookmark_file(&find_workspace().0.join(".helix").join("bookmarks")) {
+        Ok(bookmarks) => bookmarks,
+        Err(e) => {
+            cx.editor.set_error(format!("{}", e));
+            return;
+        }
+    };
+    for bookmark in bookmarks {
+        if let Err(e) = injector.push(bookmark) {
+            cx.editor.set_error(format!("{}", e));
+            return;
+        }
+    }
     cx.push_layer(Box::new(overlaid(picker)));
 }
 
