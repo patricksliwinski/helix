@@ -3286,7 +3286,8 @@ fn bookmark_picker(cx: &mut Context) {
             return;
         }
     };
-    for bookmark in bookmarks {
+    for mut bookmark in bookmarks {
+        bookmark.filepath = find_workspace().0.join(bookmark.filepath);
         if let Err(e) = injector.push(bookmark) {
             cx.editor.set_error(format!("{}", e));
             return;
