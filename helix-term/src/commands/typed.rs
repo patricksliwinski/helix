@@ -1298,15 +1298,18 @@ fn add_bookmark(
         Err(e) => return Err(e.into()) 
     };
 
-    // Create new bookmark at the current line with note from command args
     let (view, doc) = current_ref!(cx.editor);
     let text = doc.text().slice(..);
+
     let doc_path = match doc.path() {
         Some(path) => path,
         None => bail!("Cannot add bookmark in document without path")
     };
-    let relative_path = doc_path.strip_prefix(workspace_dir).unwrap();
-    let note = args.join(" ");
+    
+    let relative_path = match doc_path.strip_prefix(workspace_dir) {
+        Ok(relative_path) => relative_path,
+        Err(_) => bail!("Bookmark not in current workspace")
+    };
 
     // Find bookmarked line
     let line_num = doc.selection(view.id).primary().cursor_line(text);
@@ -1328,6 +1331,11 @@ fn add_bookmark(
     let mut context_after: Vec<String> = vec![];
     for line in text.slice(context_after_start_char..context_after_end_char).lines() {
         context_after.push(line.to_string())
+    };
+
+    let note = match args.len() {
+        0 => line.clone().trim().to_owned(),
+        _ => args.join(" ")
     };
 
     let bookmark = bookmark::Bookmark {
