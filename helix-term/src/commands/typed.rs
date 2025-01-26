@@ -1301,21 +1301,44 @@ fn add_bookmark(
     // Create new bookmark at the current line with note from command args
     let (view, doc) = current_ref!(cx.editor);
     let text = doc.text().slice(..);
-    let line_num = doc.selection(view.id).primary().cursor_line(text) + 1;
     let doc_path = match doc.path() {
         Some(path) => path,
         None => bail!("Cannot add bookmark in document without path")
     };
     let relative_path = doc_path.strip_prefix(workspace_dir).unwrap();
     let note = args.join(" ");
+
+    // Find bookmarked line
+    let line_num = doc.selection(view.id).primary().cursor_line(text);
+    let line_start_char = text.line_to_char(line_num);
+    let line_end_char = text.line_to_char(line_num+1);
+    let line = text.slice(line_start_char..line_end_char).to_string();
+
+    // Grab lines before for context
+    let context_before_start_char = text.line_to_char(line_num - 3.min(line_num));
+    let context_before_end_char = text.line_to_char(line_num);
+    let mut context_before: Vec<String> = vec![];
+    for line in text.slice(context_before_start_char..context_before_end_char).lines() {
+        context_before.push(line.to_string())
+    };
+
+    // Grab lines after for context
+    let context_after_start_char = text.line_to_char((line_num + 1).min(text.len_lines()));
+    let context_after_end_char = text.line_to_char((line_num + 4).min(text.len_lines()));
+    let mut context_after: Vec<String> = vec![];
+    for line in text.slice(context_after_start_char..context_after_end_char).lines() {
+        context_after.push(line.to_string())
+    };
+
     let bookmark = bookmark::Bookmark {
         filepath: relative_path.to_path_buf(),
-        line_num,
-        context_before: vec![],
-        line: "".to_string(),
-        context_after: vec![],
+        line_num: line_num + 1,
+        context_before,
+        line,
+        context_after,
         note
     };    
+
     bookmarks.push(bookmark);
 
     // Save bookmarks to bookmark file

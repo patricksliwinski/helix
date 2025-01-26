@@ -3262,21 +3262,36 @@ fn bookmark_picker(cx: &mut Context) {
             };
             let view = view_mut!(cx.editor);
             let text = doc.text();
-            let line_num = bookmark.line_num - 1; // Editor line nums are 0-indexed
-            if line_num >= text.len_lines() {
-                cx.editor.set_error(
-                    "The line you jumped to does not exist anymore because the file has changed.",
-                );
-                return;
-            }
+            let line_num = match bookmark::locate_bookmark(text, bookmark) {
+                Some(line_num) => line_num,
+                None => {
+                    cx.editor.set_error("The bookmarked line no longer exists");
+                    return;
+                }
+            };
             let start = text.line_to_char(line_num);
             doc.set_selection(view.id, Selection::single(start, start));
             if action.align_view(view, doc.id()) {
                 align_view(doc, view, Align::Center);
             }
         }
-    ).with_preview(|_editor, bookmark::Bookmark { filepath, line_num, ..}| {
-        Some((filepath.as_path().into(), Some((*line_num-1, *line_num-1))))       
+    ).with_preview(|editor, bookmark: &bookmark::Bookmark | {
+        // @TODO Remove duplicated code to locate bookmark
+        if let Some(doc) = editor.document_by_path(bookmark.filepath.clone()) {
+            if let Some(line) = bookmark::locate_bookmark(doc.text(), bookmark) {
+                Some((bookmark.filepath.as_path().into(), Some((line, line))))       
+            } else {
+                None
+            }
+        } else if let Ok(doc) = Document::open(&bookmark.filepath, None, None, editor.config.clone()) {
+            if let Some(line) = bookmark::locate_bookmark(doc.text(), bookmark) {
+                Some((bookmark.filepath.as_path().into(), Some((line, line))))       
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     });
     let injector = picker.injector();
     let bookmarks = match bookmark::read_bookmark_file(&find_workspace().0.join(".helix").join("bookmarks")) {
