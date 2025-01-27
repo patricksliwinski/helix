@@ -3243,7 +3243,10 @@ fn changed_file_picker(cx: &mut Context) {
 
 fn bookmark_picker(cx: &mut Context) {
     let columns = [
-        PickerColumn::new("path", |bookmark: &bookmark::Bookmark, _| {
+        PickerColumn::new("id", |bookmark: &bookmark::Bookmark, _| {
+            bookmark.id.to_string().into()
+        }),
+        PickerColumn::new("note", |bookmark: &bookmark::Bookmark, _| {
             bookmark.note.clone().into()
         })
     ];

@@ -15,6 +15,7 @@ pub struct Bookmark {
     pub line: String,
     pub context_after: Vec<String>,
     pub note: String,
+    pub id: u32,
 }
 
 pub fn read_bookmark_file(path: &Path) -> std::io::Result<Vec<Bookmark>> {

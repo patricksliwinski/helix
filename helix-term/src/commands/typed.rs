@@ -1338,13 +1338,19 @@ fn add_bookmark(
         _ => args.join(" ")
     };
 
+    let id = match bookmarks.last() {
+        Some(bookmark) => bookmark.id + 1,
+        None => 1
+    };
+
     let bookmark = bookmark::Bookmark {
         filepath: relative_path.to_path_buf(),
         line_num: line_num + 1,
         context_before,
         line,
         context_after,
-        note
+        note,
+        id
     };    
 
     bookmarks.push(bookmark);
@@ -1361,12 +1367,20 @@ fn add_bookmark(
 
 fn remove_bookmark(
     cx: &mut compositor::Context,
-    _args: &[Cow<str>],
+    args: &[Cow<str>],
     event: PromptEvent,
 ) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
     }
+
+    let id: u32 = match args.first() {
+        Some(id_str) => match id_str.parse() {
+            Ok(id) => id,
+            Err(e) => bail!(e)
+        },
+        None => bail!("remove-bookmark takes 1 arg, the id to remove")
+    };
 
     // Load bookmarks from bookmark file
     let workspace_dir = find_workspace().0;
@@ -1376,23 +1390,14 @@ fn remove_bookmark(
         Err(e) => return Err(e.into()) 
     };
 
-    // Remove all bookmarks at the current line
-    let (view, doc) = current_ref!(cx.editor);
-    let text = doc.text().slice(..);
-    let doc_path = match doc.path() {
-        Some(path) => path,
-        None => bail!("Cannot remove bookmark in document without path")
-    };
-    let line_num = doc.selection(view.id).primary().cursor_line(text) + 1;
-    let relative_path = doc_path.strip_prefix(workspace_dir).unwrap();
     bookmarks.retain(|bookmark| {
-        return !(bookmark.line_num == line_num && bookmark.filepath == relative_path)
+        return !(bookmark.id == id)
     });
 
     // Save bookmarks to bookmark file
     match bookmark::write_bookmark_file(&bookmark_path, &bookmarks) {
         Ok(()) => {
-            cx.editor.set_status(format!("Removed bookmark on line {}", line_num));
+            cx.editor.set_status(format!("Removed bookmark {}", id));
             return Ok(());
         },
         Err(e) => return Err(e.into())
