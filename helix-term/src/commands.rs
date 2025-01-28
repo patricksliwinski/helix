@@ -3252,7 +3252,7 @@ fn bookmark_picker(cx: &mut Context) {
     ];
     let picker = Picker::new(
         columns,
-        0,
+        1,
         [],
         (),
         |cx, bookmark: &bookmark::Bookmark, action| {
