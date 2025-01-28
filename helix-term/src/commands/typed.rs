@@ -1358,7 +1358,7 @@ fn add_bookmark(
     // Save bookmarks to bookmark file
     match bookmark::write_bookmark_file(&bookmark_path, &bookmarks) {
         Ok(()) => {
-            cx.editor.set_status(format!("Added bookmark on line {}", line_num));
+            cx.editor.set_status(format!("Added bookmark on line {}", line_num + 1));
             return Ok(());
         },
         Err(e) => return Err(e.into())
