@@ -1290,12 +1290,9 @@ fn add_bookmark(
         return Ok(());
     }
 
-    // Load bookmarks from bookmark file
-    let workspace_dir = find_workspace().0;
-    let bookmark_path = workspace_dir.clone().join(".helix").join("bookmarks");
-    let mut bookmarks = match bookmark::read_bookmark_file(&bookmark_path) {
+    let mut bookmarks = match bookmark::read_bookmark_file() {
         Ok(bookmarks) => bookmarks,
-        Err(e) => return Err(e.into()) 
+        Err(e) => return Err(e.into())
     };
 
     let (view, doc) = current_ref!(cx.editor);
@@ -1303,38 +1300,21 @@ fn add_bookmark(
 
     let doc_path = match doc.path() {
         Some(path) => path,
-        None => bail!("Cannot add bookmark in document without path")
+        None => bail!("Cannot add bookmark in document with no path set")
     };
-    
-    let relative_path = match doc_path.strip_prefix(workspace_dir) {
+
+    let relative_path = match doc_path.strip_prefix(find_workspace().0) {
         Ok(relative_path) => relative_path,
-        Err(_) => bail!("Bookmark not in current workspace")
+        Err(_) => bail!("Cannot add bookmark in file outside the current workspace")
     };
 
     // Find bookmarked line
     let line_num = doc.selection(view.id).primary().cursor_line(text);
-    let line_start_char = text.line_to_char(line_num);
-    let line_end_char = text.line_to_char(line_num+1);
-    let line = text.slice(line_start_char..line_end_char).to_string();
+    let line = text.line(line_num).to_string().trim().to_owned();
 
-    // Grab lines before for context
-    let context_before_start_char = text.line_to_char(line_num - 3.min(line_num));
-    let context_before_end_char = text.line_to_char(line_num);
-    let mut context_before: Vec<String> = vec![];
-    for line in text.slice(context_before_start_char..context_before_end_char).lines() {
-        context_before.push(line.to_string())
-    };
-
-    // Grab lines after for context
-    let context_after_start_char = text.line_to_char((line_num + 1).min(text.len_lines()));
-    let context_after_end_char = text.line_to_char((line_num + 4).min(text.len_lines()));
-    let mut context_after: Vec<String> = vec![];
-    for line in text.slice(context_after_start_char..context_after_end_char).lines() {
-        context_after.push(line.to_string())
-    };
-
+    // If no note argument is given, use the bookmarked line itself
     let note = match args.len() {
-        0 => line.clone().trim().to_owned(),
+        0 => line.clone(),
         _ => args.join(" ")
     };
 
@@ -1346,17 +1326,14 @@ fn add_bookmark(
     let bookmark = bookmark::Bookmark {
         filepath: relative_path.to_path_buf(),
         line_num: line_num + 1,
-        context_before,
-        line,
-        context_after,
+        line: line.to_string(),
         note,
         id
-    };    
+    };
 
     bookmarks.push(bookmark);
 
-    // Save bookmarks to bookmark file
-    match bookmark::write_bookmark_file(&bookmark_path, &bookmarks) {
+    match bookmark::write_bookmark_file(&bookmarks) {
         Ok(()) => {
             cx.editor.set_status(format!("Added bookmark on line {}", line_num + 1));
             return Ok(());
@@ -1382,25 +1359,48 @@ fn remove_bookmark(
         None => bail!("remove-bookmark takes 1 arg, the id to remove")
     };
 
-    // Load bookmarks from bookmark file
-    let workspace_dir = find_workspace().0;
-    let bookmark_path = workspace_dir.clone().join(".helix").join("bookmarks");
-    let mut bookmarks = match bookmark::read_bookmark_file(&bookmark_path) {
+    let mut bookmarks = match bookmark::read_bookmark_file() {
         Ok(bookmarks) => bookmarks,
-        Err(e) => return Err(e.into()) 
+        Err(e) => return Err(e.into())
     };
 
-    bookmarks.retain(|bookmark| {
-        return !(bookmark.id == id)
-    });
+    bookmarks.retain(|bookmark| { bookmark.id != id });
 
-    // Save bookmarks to bookmark file
-    match bookmark::write_bookmark_file(&bookmark_path, &bookmarks) {
+    match bookmark::write_bookmark_file(&bookmarks) {
         Ok(()) => {
             cx.editor.set_status(format!("Removed bookmark {}", id));
             return Ok(());
         },
         Err(e) => return Err(e.into())
+    }
+}
+
+fn create_bookmark_file(
+    cx: &mut compositor::Context,
+    _args: &[Cow<str>],
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let bookmark_file = bookmark::bookmark_file();
+    if bookmark_file.exists() {
+        bail!("Bookmark file {} already exists", bookmark_file.display())
+    }
+
+    if let Some(parent) = bookmark_file.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).ok();
+        }
+    }
+
+    match bookmark::write_bookmark_file(&vec![]) {
+        Ok(()) => {
+            cx.editor.set_status(format!("Created bookmark file {}", bookmark_file.display()));
+            Ok(())
+        },
+        Err(e) => Err(e.into())
     }
 }
 
@@ -3003,13 +3003,20 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &[],
         doc: "Add a bookmark at the current line",
         fun: add_bookmark,
-        signature: CommandSignature::positional(&[]),
+        signature: CommandSignature::none(),
     },
     TypableCommand {
         name: "remove-bookmark",
         aliases: &[],
         doc: "Remove a bookmark at the current line",
         fun: remove_bookmark,
+        signature: CommandSignature::none(),
+    },
+    TypableCommand {
+        name: "create-bookmark-file",
+        aliases: &[],
+        doc: "Create a bookmark file in the current workspace",
+        fun: create_bookmark_file,
         signature: CommandSignature::none(),
     },
     TypableCommand {

@@ -15,8 +15,7 @@ use tui::text::Span;
 pub use typed::*;
 
 use helix_core::{
-    bookmark,
-    char_idx_at_visual_offset,
+    bookmark, char_idx_at_visual_offset,
     chars::char_is_word,
     comment,
     doc_formatter::TextFormat,
@@ -3248,22 +3247,29 @@ fn bookmark_picker(cx: &mut Context) {
         }),
         PickerColumn::new("note", |bookmark: &bookmark::Bookmark, _| {
             bookmark.note.clone().into()
-        })
+        }),
+        PickerColumn::new("path", |bookmark: &bookmark::Bookmark, _| {
+            let path = helix_stdx::path::get_relative_path(&bookmark.filepath);
+            format!("{}:{}", path.to_string_lossy(), bookmark.line_num).into()
+        }),
     ];
     let picker = Picker::new(
         columns,
-        1,
+        1, // The note text is the primary column
         [],
         (),
         |cx, bookmark: &bookmark::Bookmark, action| {
             let doc = match cx.editor.open(&bookmark.filepath, action) {
                 Ok(id) => doc_mut!(cx.editor, &id),
                 Err(e) => {
-                    cx.editor.set_error(format!("Failed to open file '{}': {}", bookmark.filepath.display(), e));
+                    cx.editor.set_error(format!(
+                        "Failed to open file '{}': {}",
+                        bookmark.filepath.display(),
+                        e
+                    ));
                     return;
                 }
             };
-            let view = view_mut!(cx.editor);
             let text = doc.text();
             let line_num = match bookmark::locate_bookmark(text, bookmark) {
                 Some(line_num) => line_num,
@@ -3273,44 +3279,60 @@ fn bookmark_picker(cx: &mut Context) {
                 }
             };
             let start = text.line_to_char(line_num);
+            let view = view_mut!(cx.editor);
             doc.set_selection(view.id, Selection::single(start, start));
             if action.align_view(view, doc.id()) {
                 align_view(doc, view, Align::Center);
             }
-        }
-    ).with_preview(|editor, bookmark: &bookmark::Bookmark | {
-        // @TODO Remove duplicated code to locate bookmark
+        },
+    )
+    .with_preview(|editor, bookmark: &bookmark::Bookmark| {
+        // If the bookmarked file is already open in the editor, locate the
+        // bookmark in the existing document
         if let Some(doc) = editor.document_by_path(bookmark.filepath.clone()) {
-            if let Some(line) = bookmark::locate_bookmark(doc.text(), bookmark) {
-                Some((bookmark.filepath.as_path().into(), Some((line, line))))       
-            } else {
-                None
-            }
-        } else if let Ok(doc) = Document::open(&bookmark.filepath, None, None, editor.config.clone()) {
-            if let Some(line) = bookmark::locate_bookmark(doc.text(), bookmark) {
-                Some((bookmark.filepath.as_path().into(), Some((line, line))))       
-            } else {
-                None
-            }
+            bookmark::locate_bookmark(doc.text(), bookmark)
+                .map(|line| (bookmark.filepath.as_path().into(), Some((line, line))))
+
+        // Otherwise, open a new document to look for the bookmark
+        } else if let Ok(doc) =
+            Document::open(&bookmark.filepath, None, None, editor.config.clone())
+        {
+            bookmark::locate_bookmark(doc.text(), bookmark)
+                .map(|line| (bookmark.filepath.as_path().into(), Some((line, line))))
         } else {
             None
         }
     });
+
     let injector = picker.injector();
-    let bookmarks = match bookmark::read_bookmark_file(&find_workspace().0.join(".helix").join("bookmarks")) {
+    let bookmarks = match bookmark::read_bookmark_file() {
         Ok(bookmarks) => bookmarks,
         Err(e) => {
-            cx.editor.set_error(format!("{}", e));
+            match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    cx.editor.set_error("Could not find workspace bookmark file. Use create-bookmark-file");
+                }
+                _ => {
+                    cx.editor.set_error(format!(
+                        "Error reading {}: {}",
+                        bookmark::bookmark_file().display(),
+                        e
+                    ));
+                }
+            };
             return;
         }
     };
     for mut bookmark in bookmarks {
+        // Bookmarks are stored with paths relative to the workspace
+        // Join with the workspace to get the full path
         bookmark.filepath = find_workspace().0.join(bookmark.filepath);
         if let Err(e) = injector.push(bookmark) {
             cx.editor.set_error(format!("{}", e));
             return;
         }
     }
+
     cx.push_layer(Box::new(overlaid(picker)));
 }
 
